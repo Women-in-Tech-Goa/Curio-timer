@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Curio Timer</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Flash overlay */
+    #flashOverlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 200;
+      opacity: 0;
+    }
+    #flashOverlay.flash-brief {
+      animation: briefFlash 0.4s ease-in-out 3;
+    }
+    #flashOverlay.flash-alarm {
+      animation: alarmFlash 0.6s ease-in-out infinite;
+    }
+    @keyframes briefFlash {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; background: rgba(220, 30, 30, 0.55); }
+    }
+    @keyframes alarmFlash {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; background: rgba(220, 20, 20, 0.65); }
+    }
+
+    /* Logo — top-right corner */
+    #witLogo {
+      position: fixed;
+      top: 18px;
+      right: 22px;
+      height: 96px;
+      width: auto;
+      opacity: 0.9;
+    }
+    #witLogoPlaceholder {
+      position: fixed;
+      top: 18px;
+      right: 22px;
+      font-size: 0.62rem;
+      letter-spacing: 0.12em;
+      color: #333;
+      text-transform: uppercase;
+      text-align: right;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    h1 {
+      font-family: 'Times New Roman', Times, serif;
+      font-weight: bold;
+      font-size: 6rem;
+      color: #cc0000;
+      letter-spacing: 0.04em;
+      display: inline-block;
+      transform: scaleX(0.72);
+      transform-origin: center;
+    }
+
+    /* Alert banner */
+    #alertBanner {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.45rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #ff3333;
+      opacity: 0;
+      transition: opacity 0.2s;
+      text-align: center;
+    }
+    #alertBanner.visible { opacity: 1; }
+    #alertBanner.pulse { animation: textPulse 0.6s ease-in-out infinite; }
+    @keyframes textPulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* Clock container */
+    .clock-wrap {
+      position: relative;
+      width: 620px;
+      height: 620px;
+      margin: 4px 0;
+    }
+    .clock-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .ring-bg {
+      fill: none;
+      stroke: #1c1c1c;
+      stroke-width: 46;
+    }
+    .ring-progress {
+      fill: none;
+      stroke-width: 46;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.95s linear, stroke 0.5s ease;
+    }
+    /* tick dot */
+    #tickDot {
+      transition: cx 0.95s linear, cy 0.95s linear;
+    }
+
+    /* Center text inside clock */
+    .clock-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      pointer-events: none;
+    }
+    #mainTime {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 7rem;
+      font-weight: bold;
+      letter-spacing: 0.04em;
+      line-height: 1;
+      transition: color 0.4s;
+    }
+    #clockLabel {
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      color: #3a3a3a;
+      text-transform: uppercase;
+    }
+    #overtimeLine {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 1.1rem;
+      color: #ff3333;
+      font-weight: bold;
+      letter-spacing: 0.08em;
+      display: none;
+    }
+
+    /* Grace tracker */
+    #graceLine {
+      font-size: 0.68rem;
+      letter-spacing: 0.15em;
+      color: #2a6632;
+      text-transform: uppercase;
+      display: none;
+      margin-top: 2px;
+    }
+
+    /* Buttons */
+    .controls-main { margin-top: 10px; }
+    .controls-mod {
+      margin-top: 8px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
+    }
+    .mod-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      color: #2a2a2a;
+      text-transform: uppercase;
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    button {
+      border: none;
+      border-radius: 6px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    button:hover:not(:disabled) { opacity: 0.8; }
+    button:active:not(:disabled) { transform: scale(0.96); }
+    button:disabled { opacity: 0.18; cursor: default; }
+
+    #btnStart {
+      font-size: 1.15rem;
+      padding: 0.85rem 3.2rem;
+      background: #cc1111;
+      color: #fff;
+      border-radius: 8px;
+    }
+    #btnPauseAlarm {
+      font-size: 0.76rem;
+      padding: 0.5rem 1rem;
+      background: #1e1e1e;
+      color: #999;
+      border: 1px solid #2e2e2e;
+    }
+    #btnGrace {
+      font-size: 0.76rem;
+      padding: 0.5rem 1rem;
+      background: #0f220f;
+      color: #44cc44;
+      border: 1px solid #1e3d1e;
+    }
+    #btnReset {
+      font-size: 0.76rem;
+      padding: 0.5rem 0.9rem;
+      background: #111;
+      color: #3a3a3a;
+      border: 1px solid #1e1e1e;
+    }
+  </style>
+</head>
+<body>
+  <div id="flashOverlay"></div>
+
+  <!-- Logo: drop your image file here and rename to witgoa-logo.png -->
+  <img id="witLogo" src="WittyGirlsLogo.png" alt="Women in Tech Goa"
+       onerror="this.style.display='none'; document.getElementById('witLogoPlaceholder').style.display='block'" />
+  <div id="witLogoPlaceholder" style="display:none">Women in Tech<br>Goa</div>
+
+  <div class="header">
+    <h1>Curio</h1>
+  </div>
+
+  <div id="alertBanner"></div>
+
+  <div class="clock-wrap">
+    <!-- SVG: rings sit in a group rotated -90° so 12 o'clock is the start point.
+         Tick dot is outside the group so its coords are in normal screen space. -->
+    <svg class="clock-svg" viewBox="0 0 620 620" id="clockSvg">
+      <g transform="rotate(-90 310 310)">
+        <circle class="ring-bg"       cx="310" cy="310" r="270" />
+        <circle class="ring-progress" cx="310" cy="310" r="270" id="ringProgress" />
+      </g>
+      <!-- Tick dot sits at the leading edge of the arc, in screen space -->
+      <circle id="tickDot" r="13" fill="#ffffff" cx="310" cy="40" />
+    </svg>
+    <div class="clock-center">
+      <div id="mainTime">5:00</div>
+      <div id="clockLabel">Ready</div>
+      <div id="overtimeLine"></div>
+      <div id="graceLine"></div>
+    </div>
+  </div>
+
+  <div class="controls-main">
+    <button id="btnStart" onclick="handleStartPause()">Start</button>
+  </div>
+  <div class="controls-mod">
+    <button id="btnPauseAlarm" onclick="handlePauseAlarm()" disabled>Pause Alarm</button>
+    <button id="btnGrace"      onclick="handleGrace()"      disabled>+1 Min Grace</button>
+    <button id="btnReset"      onclick="handleReset()">Reset</button>
+  </div>
+  <div class="mod-label">Moderator Controls</div>
+
+  <script>
+    // ─── Config ──────────────────────────────────────────────────────────
+    const TOTAL          = 5 * 60;
+    const ALERT_3MIN_EL  = 3 * 60; // elapsed seconds
+    const WARN_30_REM    = 30;      // seconds remaining
+    const OVERTIME_WARN  = 30;      // seconds into overtime
+
+    const CX = 310, CY = 310, RADIUS = 270;
+    const CIRC = 2 * Math.PI * RADIUS;
+
+    // ─── State ───────────────────────────────────────────────────────────
+    let totalAlloc = TOTAL;
+    let secsLeft   = TOTAL;
+    let overtime   = 0;
+    let graceTotal = 0; // cumulative extra seconds granted
+    let running    = false;
+    let inOvertime = false;
+    let intervalId = null;
+
+    let fired3min        = false;
+    let fired30sec       = false;
+    let firedTimesUp     = false;
+    let firedOvertimeWarn = false;
+    let alarmStopFn      = null;
+
+    // ─── Audio ───────────────────────────────────────────────────────────
+    let actx = null;
+    // Shared chain: gain (boost) → compressor → output
+    // Lets us push volume well above 1.0 without clipping
+    let audioOut = null;
+    function aC() {
+      if (!actx) {
+        actx = new (window.AudioContext || window.webkitAudioContext)();
+        const comp = actx.createDynamicsCompressor();
+        comp.threshold.value = -6;
+        comp.knee.value      = 3;
+        comp.ratio.value     = 10;
+        comp.attack.value    = 0.001;
+        comp.release.value   = 0.08;
+        comp.connect(actx.destination);
+        const boost = actx.createGain();
+        boost.gain.value = 2.2;
+        boost.connect(comp);
+        audioOut = boost;
+      }
+      if (actx.state === 'suspended') actx.resume();
+      return actx;
+    }
+    // Layer two oscillators (sine + triangle or square) for body + edge
+    function tone(freq, dur, vol, type = 'sine', delay = 0, type2 = null) {
+      const c = aC();
+      function osc(t, v) {
+        const o = c.createOscillator(), g = c.createGain();
+        o.connect(g); g.connect(audioOut);
+        o.type = t; o.frequency.value = freq;
+        g.gain.setValueAtTime(v, c.currentTime + delay);
+        g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + delay + dur);
+        o.start(c.currentTime + delay);
+        o.stop(c.currentTime + delay + dur + 0.05);
+      }
+      osc(type, vol);
+      if (type2) osc(type2, vol * 0.55); // second layer for richness
+    }
+
+    // 3-min alert: three bold ascending chimes
+    function sound3min() {
+      tone(880,  0.45, 0.9, 'sine', 0,    'triangle');
+      tone(1100, 0.45, 0.9, 'sine', 0.55, 'triangle');
+      tone(1320, 0.70, 0.9, 'sine', 1.1,  'triangle');
+    }
+
+    // 30-sec warning: five sharp double-blasts
+    function sound30sec() {
+      for (let i = 0; i < 5; i++) {
+        tone(1500, 0.14, 1.0, 'square', i * 0.28);
+        tone(1200, 0.10, 0.8, 'square', i * 0.28 + 0.16);
+      }
+      tone(1800, 0.7, 1.0, 'square', 1.5, 'sawtooth');
+    }
+
+    // Time's-up alarm: loud two-tone siren bursts every 450 ms
+    // Overtime alarm:  max-aggression triple sawtooth every 350 ms
+    function startAlarm(type) {
+      let stopped = false;
+      function burst() {
+        if (stopped) return;
+        if (type === 'timesup') {
+          tone(960, 0.18, 1.0, 'square',   0,    'sawtooth');
+          tone(720, 0.18, 1.0, 'square',   0.22, 'sawtooth');
+        } else {
+          tone(1100, 0.11, 1.0, 'sawtooth', 0,    'square');
+          tone(1450, 0.11, 1.0, 'sawtooth', 0.13, 'square');
+          tone(880,  0.11, 1.0, 'sawtooth', 0.26, 'square');
+        }
+      }
+      burst();
+      const id = setInterval(burst, type === 'timesup' ? 450 : 340);
+      alarmStopFn = () => { stopped = true; clearInterval(id); alarmStopFn = null; };
+    }
+    function stopAlarm() { if (alarmStopFn) alarmStopFn(); }
+
+    // ─── Flash ───────────────────────────────────────────────────────────
+    const overlay = document.getElementById('flashOverlay');
+    function flashBrief() {
+      overlay.className = '';
+      void overlay.offsetWidth;
+      overlay.className = 'flash-brief';
+      overlay.addEventListener('animationend', () => overlay.className = '', { once: true });
+    }
+    function flashAlarmOn() { overlay.className = 'flash-alarm'; }
+    function flashOff()     { overlay.className = ''; }
+
+    // ─── Banner ──────────────────────────────────────────────────────────
+    const banner = document.getElementById('alertBanner');
+    let bannerTimer = null;
+    function showBanner(msg, persistent = false, pulse = false) {
+      if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+      banner.textContent = msg;
+      banner.className = 'visible' + (pulse ? ' pulse' : '');
+      if (!persistent) bannerTimer = setTimeout(clearBanner, 4500);
+    }
+    function clearBanner() { banner.className = ''; banner.textContent = ''; }
+
+    // ─── DOM refs ────────────────────────────────────────────────────────
+    const ringEl   = document.getElementById('ringProgress');
+    const tickDot  = document.getElementById('tickDot');
+    const timeEl   = document.getElementById('mainTime');
+    const labelEl  = document.getElementById('clockLabel');
+    const otLine   = document.getElementById('overtimeLine');
+    const grLine   = document.getElementById('graceLine');
+
+    function fmt(s) {
+      s = Math.abs(Math.round(s));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+
+    // ─── Render ──────────────────────────────────────────────────────────
+    function render() {
+      ringEl.style.strokeDasharray = CIRC;
+
+      // Elapsed fraction drives the clockwise-filling arc
+      const elapsed  = inOvertime ? totalAlloc : totalAlloc - secsLeft;
+      const fraction = Math.max(0, Math.min(1, elapsed / totalAlloc));
+
+      // Arc: offset=CIRC means empty, offset=0 means full
+      ringEl.style.strokeDashoffset = CIRC * (1 - fraction);
+
+      // Tick dot — leading edge of arc in screen coordinates
+      // Angle: -π/2 (top) + fraction * 2π clockwise
+      const angle = -Math.PI / 2 + fraction * 2 * Math.PI;
+      const tx = CX + RADIUS * Math.cos(angle);
+      const ty = CY + RADIUS * Math.sin(angle);
+      tickDot.setAttribute('cx', tx);
+      tickDot.setAttribute('cy', ty);
+
+      if (!inOvertime) {
+        timeEl.textContent  = fmt(secsLeft);
+        otLine.style.display = 'none';
+
+        if (secsLeft <= WARN_30_REM && secsLeft > 0) {
+          ringEl.style.stroke = '#ff2222';
+          timeEl.style.color  = '#ff4444';
+          tickDot.setAttribute('fill', '#ff4444');
+        } else if (secsLeft <= 120) {
+          ringEl.style.stroke = '#ff7700';
+          timeEl.style.color  = '#ff8800';
+          tickDot.setAttribute('fill', '#ff8800');
+        } else {
+          ringEl.style.stroke = '#bb1111';
+          timeEl.style.color  = '#ffffff';
+          tickDot.setAttribute('fill', '#ffffff');
+        }
+      } else {
+        // Overtime: ring full, pulsing red flash from CSS
+        ringEl.style.stroke  = '#ff2222';
+        timeEl.textContent   = '0:00';
+        timeEl.style.color   = '#ff3333';
+        tickDot.setAttribute('fill', '#ff3333');
+        otLine.style.display = 'block';
+        otLine.textContent   = `+${fmt(overtime)} overtime`;
+      }
+
+      // Grace tracker
+      if (graceTotal > 0) {
+        grLine.style.display = 'block';
+        grLine.textContent   = `grace given: +${fmt(graceTotal)}`;
+      }
+    }
+
+    // ─── Tick (every second) ─────────────────────────────────────────────
+    function tick() {
+      if (!inOvertime) {
+        secsLeft = Math.max(0, secsLeft - 1);
+        const elapsed = totalAlloc - secsLeft;
+
+        if (!fired3min && elapsed >= ALERT_3MIN_EL) {
+          fired3min = true;
+          sound3min();
+          flashBrief();
+          showBanner('3 minutes up — wrapping up?');
+          labelEl.textContent = 'Wrap up';
+        }
+        if (!fired30sec && secsLeft === WARN_30_REM) {
+          fired30sec = true;
+          sound30sec();
+          flashBrief();
+          showBanner('⚠  30 seconds remaining');
+          labelEl.textContent = '30 sec left';
+        }
+        if (!firedTimesUp && secsLeft === 0) {
+          firedTimesUp = true;
+          inOvertime   = true;
+          overtime     = 0;
+          showBanner('Stop — time is up!', true, true);
+          labelEl.textContent = 'Overtime';
+          startAlarm('timesup');
+          flashAlarmOn();
+          document.getElementById('btnPauseAlarm').disabled = false;
+          document.getElementById('btnGrace').disabled = false;
+        }
+      } else {
+        overtime++;
+        if (!firedOvertimeWarn && overtime >= OVERTIME_WARN) {
+          firedOvertimeWarn = true;
+          showBanner('30 sec overtime — stop now!', true, true);
+          stopAlarm();
+          startAlarm('overtime');
+        }
+      }
+      render();
+    }
+
+    // ─── Controls ────────────────────────────────────────────────────────
+    function handleStartPause() {
+      const btn = document.getElementById('btnStart');
+      if (!running) {
+        running = true;
+        btn.textContent = 'Pause';
+        labelEl.textContent = 'Running';
+        intervalId = setInterval(tick, 1000);
+      } else {
+        running = false;
+        btn.textContent = 'Resume';
+        labelEl.textContent = 'Paused';
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }
+
+    function handlePauseAlarm() {
+      stopAlarm();
+      flashOff();
+      const btn = document.getElementById('btnPauseAlarm');
+      btn.disabled = true;
+      setTimeout(() => { btn.disabled = false; }, 5000);
+    }
+
+    function handleGrace() {
+      graceTotal += 60;
+      if (inOvertime) {
+        stopAlarm(); flashOff();
+        inOvertime = false;
+        secsLeft   = Math.max(60 - overtime, 1);
+        overtime   = 0;
+        totalAlloc = secsLeft;
+        firedTimesUp      = false;
+        firedOvertimeWarn = false;
+        fired30sec = secsLeft > WARN_30_REM ? false : true;
+        labelEl.textContent = 'Running';
+        otLine.style.display = 'none';
+        timeEl.style.color   = '#ffffff';
+      } else {
+        secsLeft   += 60;
+        totalAlloc += 60;
+        if (secsLeft > WARN_30_REM) fired30sec = false;
+      }
+      showBanner(`+1 min grace  (total extra: ${fmt(graceTotal)})`);
+      render();
+    }
+
+    function handleReset() {
+      clearInterval(intervalId); intervalId = null;
+      stopAlarm(); flashOff(); clearBanner();
+      totalAlloc = TOTAL; secsLeft = TOTAL;
+      overtime = 0; graceTotal = 0;
+      running = inOvertime = false;
+      fired3min = fired30sec = firedTimesUp = firedOvertimeWarn = false;
+
+      document.getElementById('btnStart').textContent = 'Start';
+      document.getElementById('btnPauseAlarm').disabled = true;
+      document.getElementById('btnGrace').disabled = true;
+      labelEl.textContent  = 'Ready';
+      timeEl.style.color   = '#ffffff';
+      otLine.style.display = 'none';
+      grLine.style.display = 'none';
+      render();
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────────
+    render();
+  </script>
+</body>
+</html>
