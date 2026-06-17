@@ -291,13 +291,14 @@
     const CIRC = 2 * Math.PI * RADIUS;
 
     // ─── State ───────────────────────────────────────────────────────────
-    let totalAlloc = TOTAL;
-    let secsLeft   = TOTAL;
-    let overtime   = 0;
-    let graceTotal = 0; // cumulative extra seconds granted
-    let running    = false;
-    let inOvertime = false;
-    let intervalId = null;
+    let totalAlloc   = TOTAL;
+    let secsLeft     = TOTAL;
+    let overtime     = 0;
+    let graceTotal   = 0; // cumulative extra seconds granted
+    let totalElapsed = 0; // raw seconds since Start, never rolled back
+    let running      = false;
+    let inOvertime   = false;
+    let intervalId   = null;
 
     let fired3min        = false;
     let fired30sec       = false;
@@ -344,11 +345,26 @@
       if (type2) osc(type2, vol * 0.55); // second layer for richness
     }
 
-    // 3-min alert: three bold ascending chimes
+    // 3-min alert: four punchy ascending chimes, triple-layered
     function sound3min() {
-      tone(880,  0.45, 0.9, 'sine', 0,    'triangle');
-      tone(1100, 0.45, 0.9, 'sine', 0.55, 'triangle');
-      tone(1320, 0.70, 0.9, 'sine', 1.1,  'triangle');
+      // Each chime = sine (body) + square (punch) + triangle (shimmer)
+      function chime(freq, delay) {
+        const c = aC();
+        ['sine', 'square', 'triangle'].forEach((t, i) => {
+          const vols = [1.0, 0.7, 0.5];
+          const o = c.createOscillator(), g = c.createGain();
+          o.connect(g); g.connect(audioOut);
+          o.type = t; o.frequency.value = freq;
+          g.gain.setValueAtTime(vols[i], c.currentTime + delay);
+          g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + delay + 0.6);
+          o.start(c.currentTime + delay);
+          o.stop(c.currentTime + delay + 0.65);
+        });
+      }
+      chime(880,  0);
+      chime(1100, 0.55);
+      chime(1320, 1.1);
+      chime(1760, 1.65); // extra high final chime for emphasis
     }
 
     // 30-sec warning: five sharp double-blasts
@@ -415,6 +431,13 @@
       s = Math.abs(Math.round(s));
       return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     }
+    function fmtElapsed(s) {
+      s = Math.abs(Math.round(s));
+      const m = Math.floor(s / 60), sec = s % 60;
+      if (m === 0) return `${sec} sec${sec !== 1 ? 's' : ''} elapsed`;
+      if (sec === 0) return `${m} min${m !== 1 ? 's' : ''} elapsed`;
+      return `${m} min${m !== 1 ? 's' : ''} ${sec} sec${sec !== 1 ? 's' : ''} elapsed`;
+    }
 
     // ─── Render ──────────────────────────────────────────────────────────
     function render() {
@@ -460,17 +483,24 @@
         tickDot.setAttribute('fill', '#ff3333');
         otLine.style.display = 'block';
         otLine.textContent   = `+${fmt(overtime)} overtime`;
+        grLine.style.display = 'block';
+        grLine.textContent   = fmtElapsed(totalElapsed);
       }
 
-      // Grace tracker
-      if (graceTotal > 0) {
-        grLine.style.display = 'block';
-        grLine.textContent   = `grace given: +${fmt(graceTotal)}`;
+      // Grace / elapsed tracker (normal timer phase)
+      if (!inOvertime) {
+        if (graceTotal > 0) {
+          grLine.style.display = 'block';
+          grLine.textContent   = `${fmtElapsed(totalElapsed)}  ·  +${fmt(graceTotal)} grace`;
+        } else {
+          grLine.style.display = 'none';
+        }
       }
     }
 
     // ─── Tick (every second) ─────────────────────────────────────────────
     function tick() {
+      totalElapsed++;
       if (!inOvertime) {
         secsLeft = Math.max(0, secsLeft - 1);
         const elapsed = totalAlloc - secsLeft;
@@ -518,14 +548,21 @@
       if (!running) {
         running = true;
         btn.textContent = 'Pause';
-        labelEl.textContent = 'Running';
+        labelEl.textContent = inOvertime ? 'Overtime' : 'Running';
         intervalId = setInterval(tick, 1000);
+        // Restart alarm if we're resuming into overtime
+        if (inOvertime) {
+          startAlarm(firedOvertimeWarn ? 'overtime' : 'timesup');
+          flashAlarmOn();
+        }
       } else {
         running = false;
         btn.textContent = 'Resume';
         labelEl.textContent = 'Paused';
         clearInterval(intervalId);
         intervalId = null;
+        stopAlarm();
+        flashOff();
       }
     }
 
@@ -564,7 +601,7 @@
       clearInterval(intervalId); intervalId = null;
       stopAlarm(); flashOff(); clearBanner();
       totalAlloc = TOTAL; secsLeft = TOTAL;
-      overtime = 0; graceTotal = 0;
+      overtime = 0; graceTotal = 0; totalElapsed = 0;
       running = inOvertime = false;
       fired3min = fired30sec = firedTimesUp = firedOvertimeWarn = false;
 
